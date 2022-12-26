@@ -286,6 +286,9 @@ void seamCarving(uchar3 *inPixels, int width, int height, int targetWidth, uchar
                     priority[r * width + minCol1 + i] = computePixelPriority(grayPixels, r, minCol1 + i, width, height);
                 minCol1 += path[r * (width + 1) + minCol1];
             }
+
+        free(score);
+        free(path);
     }
     
     free(grayPixels);
