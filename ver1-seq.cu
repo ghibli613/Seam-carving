@@ -241,18 +241,19 @@ void seamCarving(uchar3 *inPixels, int width, int height, int targetWidth, uchar
         int *path = (int *)malloc(width * height * sizeof(int));        // Dynamic path table
         memset(path, 0, width * height);                                // Set all path to 0
 
-        computeSeamScoreTable(priority, score, path, width, height);    // Compute seams
+        computeSeamScoreTable(priority, score, path, width, height);    // Compute score and path
 
         uchar3 * newOutPixels = (uchar3 *)malloc((width - 1) * height * sizeof(uchar3));    // New picture after remove seam
         uint8_t *newGrayPixels= (uint8_t *)malloc((width - 1) * height * sizeof(uint8_t));  // New gray scale after remove seam
-        int *newPriority = (int *)malloc((width - 1) * height * sizeof(int));
+        int *newPriority = (int *)malloc((width - 1) * height * sizeof(int));               // New priority after remove seam
 
         // Find min index of last row
-        int minCol = 0;
+        int minCol = 0;         // index for remove seam
         for (int c = 1; c < width; c++) 
             if (score[(height - 1) * width + c] < score[(height - 1) * width + minCol])
                 minCol = c;
-        int minCol1 = minCol;
+
+        int minCol1 = minCol;   // index for recalculate priority
 
         // Trace and remove seam from last to first row
         for(int r = height - 1; r >= 0; r--) 
@@ -266,9 +267,9 @@ void seamCarving(uchar3 *inPixels, int width, int height, int targetWidth, uchar
             memcpy(newGrayPixels + r * (width - 1) + minCol, newGrayPixels + r * width + minCol + 1, (width - minCol - 1) * sizeof(uint8_t));   // Copy second part
             // Remove from priority, more complicate because seam's neighbor (around 3 index) have been affected
             if(minCol - 3 >= 0)                                                                                                                 // Copy first part
-                memcpy(newPriority + r * (width - 1), priority + r * width, (minCol - 2) * sizeof(uchar3));    
+                memcpy(newPriority + r * (width - 1), priority + r * width, (minCol - 2) * sizeof(int));    
             if(minCol + 3 < width)                                                                                                              // Copy second part
-                memcpy(newPriority + r * (width - 1) + minCol + 2, priority + r * width + minCol + 3, (width - minCol - 3) * sizeof(uchar3));                                      
+                memcpy(newPriority + r * (width - 1) + minCol + 2, priority + r * width + minCol + 3, (width - minCol - 3) * sizeof(int));                                      
 
             // Trace up
             minCol += path[r * width + minCol];
@@ -285,7 +286,6 @@ void seamCarving(uchar3 *inPixels, int width, int height, int targetWidth, uchar
                     priority[r * width + minCol1 + i] = computePixelPriority(grayPixels, r, minCol1 + i, width, height);
                 minCol1 += path[r * (width + 1) + minCol1];
             }
-
     }
     
     free(grayPixels);
