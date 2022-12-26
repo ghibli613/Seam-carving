@@ -221,8 +221,6 @@ void seamCarving(uchar3 *inPixels, int width, int height, int targetWidth, uchar
 
     memcpy(outPixels, inPixels, width * height * sizeof(uchar3));
 
-    // const int originalWidth = width;
-
     // Allocate memory
     int *priority = (int *)malloc(width * height * sizeof(int));
     
@@ -259,17 +257,17 @@ void seamCarving(uchar3 *inPixels, int width, int height, int targetWidth, uchar
         // Trace and remove seam from last to first row
         for(int r = height - 1; r >= 0; r--) 
         {
-            // Remove seam pixel on row r
+            // Remove seam pixel on row r by copy first and second parts (devited by seam) to new row
             // Remove from img
-            memcpy(newOutPixels + r * (width - 1), outPixels + r * width, minCol * sizeof(uchar3));                                             // Remove first part
-            memcpy(newOutPixels + r * (width - 1) + minCol, outPixels + r * width + minCol + 1, (width - minCol - 1) * sizeof(uchar3));         // Remove second part
+            memcpy(newOutPixels + r * (width - 1), outPixels + r * width, minCol * sizeof(uchar3));                                             // Copy first part
+            memcpy(newOutPixels + r * (width - 1) + minCol, outPixels + r * width + minCol + 1, (width - minCol - 1) * sizeof(uchar3));         // Copy second part
             // Remove from gray scale
-            memcpy(newGrayPixels + r * (width - 1), newGrayPixels + r * width, minCol * sizeof(uint8_t));                                       // Remove first part
-            memcpy(newGrayPixels + r * (width - 1) + minCol, newGrayPixels + r * width + minCol + 1, (width - minCol - 1) * sizeof(uint8_t));   // Remove second part
-            // Remove from priority
-            if(minCol - 3 >= 0)                                                                                                                 // Remove first part
+            memcpy(newGrayPixels + r * (width - 1), newGrayPixels + r * width, minCol * sizeof(uint8_t));                                       // Copy first part
+            memcpy(newGrayPixels + r * (width - 1) + minCol, newGrayPixels + r * width + minCol + 1, (width - minCol - 1) * sizeof(uint8_t));   // Copy second part
+            // Remove from priority, more complicate because seam's neighbor (around 3 index) have been affected
+            if(minCol - 3 >= 0)                                                                                                                 // Copy first part
                 memcpy(newPriority + r * (width - 1), priority + r * width, (minCol - 2) * sizeof(uchar3));    
-            if(minCol + 3 < width)                                                                                                              // Remove second part
+            if(minCol + 3 < width)                                                                                                              // Copy second part
                 memcpy(newPriority + r * (width - 1) + minCol + 2, priority + r * width + minCol + 3, (width - minCol - 3) * sizeof(uchar3));                                      
 
             // Trace up
@@ -280,10 +278,13 @@ void seamCarving(uchar3 *inPixels, int width, int height, int targetWidth, uchar
         uchar3 * dummyOut = outPixels; outPixels = newOutPixels; free(dummyOut);            //  + New img
         uint8_t * dummyGray = grayPixels; grayPixels = newGrayPixels; free(dummyGray);      //  + New gray scale
         int * dummyPriority = priority; priority = newPriority; free(dummyPriority);        //  + New priority
-        for(int r = height - 1; r >= 0; r--)                                                //      recalculate priority across the removing seam
+        for(int r = height - 1; r >= 0; r--)                                                //      recalculate priority at seam and seam's neighors
             for(int i = -2; i < 2; i++)
+            {
                 if(minCol1 + i > -1 && minCol1 < width)
                     priority[r * width + minCol1 + i] = computePixelPriority(grayPixels, r, minCol1 + i, width, height);
+                minCol1 += path[r * (width + 1) + minCol1];
+            }
 
     }
     
