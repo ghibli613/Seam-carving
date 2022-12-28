@@ -104,35 +104,6 @@ void writePnm(uchar3 * pixels, int width, int height, char * fileName)
 	fclose(f);
 }
 
-void writeGray(uint8_t * pixels, int numChannels, int width, int height, 
-		char * fileName)
-{
-	FILE * f = fopen(fileName, "w");
-	if (f == NULL)
-	{
-		printf("Cannot write %s\n", fileName);
-		exit(EXIT_FAILURE);
-	}	
-
-	if (numChannels == 1)
-		fprintf(f, "P2\n");
-	else if (numChannels == 3)
-		fprintf(f, "P3\n");
-	else
-	{
-		fclose(f);
-		printf("Cannot write %s\n", fileName);
-		exit(EXIT_FAILURE);
-	}
-
-	fprintf(f, "%i\n%i\n255\n", width, height); 
-
-	for (int i = 0; i < width * height * numChannels; i++)
-		fprintf(f, "%hhu\n", pixels[i]);
-
-	fclose(f);
-}
-
 bool checkParameter(int width, int height, int numSeamRemoved)
 {
     if(width <= 0 || height <= 0)
@@ -229,17 +200,48 @@ void computeSeamScoreTable(int *priority, int *score, int *path, int width, int 
         }
 }
 
+void writeGray(uint8_t * pixels, int numChannels, int width, int height, 
+		char * fileName)
+{
+	FILE * f = fopen(fileName, "w");
+	if (f == NULL)
+	{
+		printf("Cannot write %s\n", fileName);
+		exit(EXIT_FAILURE);
+	}	
+
+	if (numChannels == 1)
+		fprintf(f, "P2\n");
+	else if (numChannels == 3)
+		fprintf(f, "P3\n");
+	else
+	{
+		fclose(f);
+		printf("Cannot write %s\n", fileName);
+		exit(EXIT_FAILURE);
+	}
+
+	fprintf(f, "%i\n%i\n255\n", width, height); 
+
+	for (int i = 0; i < width * height * numChannels; i++)
+		fprintf(f, "%hhu\n", pixels[i]);
+
+	fclose(f);
+}
+
 void seamCarving(uchar3 *inPixels, int width, int height, int targetWidth, uchar3* outPixels) 
 {
     GpuTimer timer;
     timer.Start();
 
-    memcpy(outPixels, inPixels, width * height * sizeof(uchar3));
-
     // Allocate memory
     int *priority = (int *)malloc(width * height * sizeof(int));
     
     uint8_t *grayPixels= (uint8_t *)malloc(width * height * sizeof(uint8_t));
+
+    uchar3 * tmpOutPixels = (uchar3 *)malloc(width * height * sizeof(uchar3));
+
+    memcpy(tmpOutPixels, inPixels, width * height * sizeof(uchar3));
     
     // Turn input image to grayscale
     convertRgb2Gray(inPixels, width, height, grayPixels);
@@ -275,8 +277,8 @@ void seamCarving(uchar3 *inPixels, int width, int height, int targetWidth, uchar
         {  
             // Remove seam pixel on row r by copy first and second parts (devited by seam) to new row
             // Remove from img
-            memcpy(newOutPixels + r * (width - 1), outPixels + r * width, minCol * sizeof(uchar3));                                             // Copy first part
-            memcpy(newOutPixels + r * (width - 1) + minCol, outPixels + r * width + minCol + 1, (width - minCol - 1) * sizeof(uchar3));         // Copy second part
+            memcpy(newOutPixels + r * (width - 1), tmpOutPixels + r * width, minCol * sizeof(uchar3));                                             // Copy first part
+            memcpy(newOutPixels + r * (width - 1) + minCol, tmpOutPixels + r * width + minCol + 1, (width - minCol - 1) * sizeof(uchar3));         // Copy second part
             
             // Remove from gray scale
             memcpy(newGrayPixels + r * (width - 1), grayPixels + r * width, minCol * sizeof(uint8_t));                                          // Copy first part
@@ -292,7 +294,7 @@ void seamCarving(uchar3 *inPixels, int width, int height, int targetWidth, uchar
         }
         
         width--;                                                                            // Assign 3 things to have new set with new width = (width - 1):
-        uchar3 * dummyOut = outPixels; outPixels = newOutPixels; free(dummyOut);            //  + New img
+        uchar3 * dummyOut = tmpOutPixels; tmpOutPixels = newOutPixels; free(dummyOut);            //  + New img
         uint8_t * dummyGray = grayPixels; grayPixels = newGrayPixels; free(dummyGray);      //  + New gray scale
         int * dummyPriority = priority; priority = newPriority; free(dummyPriority);        //  + New priority
         for(int r = height - 1; r >= 0; r--)                                                //      recalculate priority at seam's neighors
@@ -307,6 +309,8 @@ void seamCarving(uchar3 *inPixels, int width, int height, int targetWidth, uchar
         free(path);
     }
     
+    memcpy(outPixels, tmpOutPixels, targetWidth * height * sizeof(uchar3));
+    free(tmpOutPixels);
     free(grayPixels);
     free(priority);
 
@@ -368,9 +372,9 @@ int main(int argc, char ** argv)
 	int targetWidth = width - numSeamRemoved;
 
 	// Seam carving
-    uchar3 * correctOutPixels = (uchar3 *)malloc(width * height * sizeof(uchar3));
+    uchar3 * correctOutPixels = (uchar3 *)malloc(targetWidth * height * sizeof(uchar3));
     seamCarving(inPixels, width, height, targetWidth, correctOutPixels);
-
+    
     // Write results to files
     char *outFileNameBase = strtok(argv[2], "."); // Get rid of extension
     writePnm(correctOutPixels, targetWidth, height, concatStr(outFileNameBase, "_host.pnm"));
