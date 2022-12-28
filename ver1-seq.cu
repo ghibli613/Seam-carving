@@ -49,7 +49,7 @@ struct GpuTimer
     }
 };
 
-void readPnm(char * fileName, int &numChannels, int &width, int &height, uchar3 * &pixels)
+void readPnm(char * fileName, int &width, int &height, uchar3 * &pixels)
 {
 	FILE * f = fopen(fileName, "r");
 	if (f == NULL)
@@ -60,11 +60,8 @@ void readPnm(char * fileName, int &numChannels, int &width, int &height, uchar3 
 
 	char type[3];
 	fscanf(f, "%s", type);
-	if (strcmp(type, "P2") == 0)
-		numChannels = 1;
-	else if (strcmp(type, "P3") == 0)
-		numChannels = 3;
-	else // In this exercise, we don't touch other types
+	
+	if (strcmp(type, "P3") != 0) // In this exercise, we don't touch other types
 	{
 		fclose(f);
 		printf("Cannot read %s\n", fileName); 
@@ -73,7 +70,7 @@ void readPnm(char * fileName, int &numChannels, int &width, int &height, uchar3 
 
 	fscanf(f, "%i", &width);
 	fscanf(f, "%i", &height);
-
+	
 	int max_val;
 	fscanf(f, "%i", &max_val);
 	if (max_val > 255) // In this exercise, we assume 1 byte per value
@@ -84,13 +81,31 @@ void readPnm(char * fileName, int &numChannels, int &width, int &height, uchar3 
 	}
 
 	pixels = (uchar3 *)malloc(width * height * sizeof(uchar3));
-    for (int i = 0; i < width * height; i++)
-        fscanf(f, "%hhu%hhu%hhu", &pixels[i].x, &pixels[i].y, &pixels[i].z);
+	for (int i = 0; i < width * height; i++)
+		fscanf(f, "%hhu%hhu%hhu", &pixels[i].x, &pixels[i].y, &pixels[i].z);
 
 	fclose(f);
 }
 
-void writePnm(uchar3 * pixels, int numChannels, int width, int height, char * fileName)
+void writePnm(uchar3 * pixels, int width, int height, char * fileName)
+{
+	FILE * f = fopen(fileName, "w");
+	if (f == NULL)
+	{
+		printf("Cannot write %s\n", fileName);
+		exit(EXIT_FAILURE);
+	}	
+
+	fprintf(f, "P3\n%i\n%i\n255\n", width, height); 
+
+	for (int i = 0; i < width * height; i++)
+		fprintf(f, "%hhu\n%hhu\n%hhu\n", pixels[i].x, pixels[i].y, pixels[i].z);
+	
+	fclose(f);
+}
+
+void writeGray(uint8_t * pixels, int numChannels, int width, int height, 
+		char * fileName)
 {
 	FILE * f = fopen(fileName, "w");
 	if (f == NULL)
@@ -112,8 +127,8 @@ void writePnm(uchar3 * pixels, int numChannels, int width, int height, char * fi
 
 	fprintf(f, "%i\n%i\n255\n", width, height); 
 
-	for (int i = 0; i < width * height; i++)
-		fprintf(f, "%hhu\n%hhu\n%hhu\n", pixels[i].x, pixels[i].y, pixels[i].z);
+	for (int i = 0; i < width * height * numChannels; i++)
+		fprintf(f, "%hhu\n", pixels[i]);
 
 	fclose(f);
 }
@@ -169,11 +184,11 @@ uint8_t getClosest(uint8_t *pixels, int r, int c, int width, int height)
     return pixels[r * width + c];
 }
 
+int xSobel[3][3] = {{1,0,-1},{2,0,-2},{1,0,-1}};
+int ySobel[3][3] = {{1,2,1},{0,0,0},{-1,-2,-1}};
+
 int computePixelPriority(uint8_t * grayPixels, int row, int col, int width, int height) 
 {
-    int xSobel[3][3] = {{1,0,-1},{2,0,-2},{1,0,-1}};
-    int ySobel[3][3] = {{1,2,1},{0,0,0},{-1,-2,-1}};
-
     int x = 0, y = 0;
     for (int i = 0; i < 3; i++) 
         for (int j = 0; j < 3; j++) 
@@ -234,52 +249,53 @@ void seamCarving(uchar3 *inPixels, int width, int height, int targetWidth, uchar
         for (int c = 0; c < width; c++) 
             priority[r * width + c] = computePixelPriority(grayPixels, r, c, width, height);
 
-    while (width > targetWidth) 
+    while (width > targetWidth)
     {
         // Compute min seam table
         int *score = (int *)malloc(width * height * sizeof(int));       // Dynamic score table
         int *path = (int *)malloc(width * height * sizeof(int));        // Dynamic path table
-        memset(path, 0, width * height);                                // Set all path to 0
+        memset(path, 0, width * height * sizeof(int));                  // Set all path to 0
 
         computeSeamScoreTable(priority, score, path, width, height);    // Compute score and path
 
-        uchar3 * newOutPixels = (uchar3 *)malloc((width - 1) * height * sizeof(uchar3));    // New picture after remove seam
-        uint8_t *newGrayPixels= (uint8_t *)malloc((width - 1) * height * sizeof(uint8_t));  // New gray scale after remove seam
-        int *newPriority = (int *)malloc((width - 1) * height * sizeof(int));               // New priority after remove seam
+        uchar3 * newOutPixels = (uchar3 *)malloc((width - 1) * height * sizeof(uchar3));    // Allocate new picture after remove seam
+        uint8_t *newGrayPixels= (uint8_t *)malloc((width - 1) * height * sizeof(uint8_t));  // Allocate new gray scale after remove seam
+        int *newPriority = (int *)malloc((width - 1) * height * sizeof(int));               // Allocate new priority after remove seam
 
         // Find min index of last row
         int minCol = 0;         // index for remove seam
         for (int c = 1; c < width; c++) 
             if (score[(height - 1) * width + c] < score[(height - 1) * width + minCol])
                 minCol = c;
-
+        
         int minCol1 = minCol;   // index for recalculate priority
 
         // Trace and remove seam from last to first row
         for(int r = height - 1; r >= 0; r--) 
-        {
+        {  
             // Remove seam pixel on row r by copy first and second parts (devited by seam) to new row
             // Remove from img
             memcpy(newOutPixels + r * (width - 1), outPixels + r * width, minCol * sizeof(uchar3));                                             // Copy first part
             memcpy(newOutPixels + r * (width - 1) + minCol, outPixels + r * width + minCol + 1, (width - minCol - 1) * sizeof(uchar3));         // Copy second part
+            
             // Remove from gray scale
-            memcpy(newGrayPixels + r * (width - 1), newGrayPixels + r * width, minCol * sizeof(uint8_t));                                       // Copy first part
-            memcpy(newGrayPixels + r * (width - 1) + minCol, newGrayPixels + r * width + minCol + 1, (width - minCol - 1) * sizeof(uint8_t));   // Copy second part
-            // Remove from priority, more complicate because seam's neighbor (around 3 index) have been affected
+            memcpy(newGrayPixels + r * (width - 1), grayPixels + r * width, minCol * sizeof(uint8_t));                                          // Copy first part
+            memcpy(newGrayPixels + r * (width - 1) + minCol, grayPixels + r * width + minCol + 1, (width - minCol - 1) * sizeof(uint8_t));      // Copy second part
+            // Remove from priority, more complicated because seam's neighbor (around 3 index) have been affected
             if(minCol - 3 >= 0)                                                                                                                 // Copy first part
                 memcpy(newPriority + r * (width - 1), priority + r * width, (minCol - 2) * sizeof(int));    
             if(minCol + 3 < width)                                                                                                              // Copy second part
                 memcpy(newPriority + r * (width - 1) + minCol + 2, priority + r * width + minCol + 3, (width - minCol - 3) * sizeof(int));                                      
-
+            
             // Trace up
             minCol += path[r * width + minCol];
         }
-
-        width--;                                                                            // Complete 3 step to have new set with new width = (width - 1):
+        
+        width--;                                                                            // Assign 3 things to have new set with new width = (width - 1):
         uchar3 * dummyOut = outPixels; outPixels = newOutPixels; free(dummyOut);            //  + New img
         uint8_t * dummyGray = grayPixels; grayPixels = newGrayPixels; free(dummyGray);      //  + New gray scale
         int * dummyPriority = priority; priority = newPriority; free(dummyPriority);        //  + New priority
-        for(int r = height - 1; r >= 0; r--)                                                //      recalculate priority at seam and seam's neighors
+        for(int r = height - 1; r >= 0; r--)                                                //      recalculate priority at seam's neighors
             for(int i = -2; i < 2; i++)
             {
                 if(minCol1 + i > -1 && minCol1 < width)
@@ -337,9 +353,9 @@ int main(int argc, char ** argv)
 	printDeviceInfo();
 
 	// Read input image file
-	int numChannels, width, height;
+	int width, height;
 	uchar3 * inPixels;
-	readPnm(argv[1], numChannels, width, height, inPixels);
+	readPnm(argv[1], width, height, inPixels);
 	printf("\nImage size (width x height): %i x %i\n", width, height);
 
 	// Get the number of seam we need to remove
@@ -357,7 +373,11 @@ int main(int argc, char ** argv)
 
     // Write results to files
     char *outFileNameBase = strtok(argv[2], "."); // Get rid of extension
-    writePnm(correctOutPixels, 3, targetWidth, height, concatStr(outFileNameBase, "_host.pnm"));
+    writePnm(correctOutPixels, targetWidth, height, concatStr(outFileNameBase, "_host.pnm"));
+
+    // Free memories
+	free(inPixels);
+	free(correctOutPixels);
 
     return 0;
 }
