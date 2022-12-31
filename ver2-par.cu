@@ -299,6 +299,15 @@ __global__ void convertRgb2GrayKernel(uchar3 * inPixels, int width, int height, 
         outPixels[idx] = 0.299f * inPixels[idx].x + 0.587f * inPixels[idx].y + 0.114f * inPixels[idx].z;
 }
 
+float computeErrorGray(uint8_t * a1, uint8_t * a2, int n)
+{
+	float err = 0;
+	for (int i = 0; i < n; i++)
+		err += abs((int)a1[i] - (int)a2[i]);
+	err /= n;
+	return err;
+}
+
 void seamCarvingByDevice(uchar3 *inPixels, int width, int height, int targetWidth, uchar3* outPixels, dim3 blockSize) 
 {
     GpuTimer timer;
@@ -306,18 +315,14 @@ void seamCarvingByDevice(uchar3 *inPixels, int width, int height, int targetWidt
 
     // Allocate memory
     int *priority = (int *)malloc(width * height * sizeof(int));
-    
     uint8_t *grayPixels= (uint8_t *)malloc(width * height * sizeof(uint8_t));
+    uchar3 * tmpOutPixels = (uchar3 *)malloc(width * height * sizeof(uchar3));
+    memcpy(tmpOutPixels, inPixels, width * height * sizeof(uchar3));
     
     uchar3 *d_inPixels;
     CHECK(cudaMalloc(&d_inPixels, width * height * sizeof(uchar3)));
-
     uint8_t * d_grayPixels;
     CHECK(cudaMalloc(&d_grayPixels, width * height * sizeof(uint8_t)));
-
-    uchar3 * tmpOutPixels = (uchar3 *)malloc(width * height * sizeof(uchar3));
-
-    memcpy(tmpOutPixels, inPixels, width * height * sizeof(uchar3));
     
     dim3 gridSize((width - 1) / blockSize.x + 1, (height - 1) / blockSize.y + 1);
 
@@ -333,6 +338,12 @@ void seamCarvingByDevice(uchar3 *inPixels, int width, int height, int targetWidt
 
     CHECK(cudaFree(d_inPixels));
     CHECK(cudaFree(d_grayPixels));
+
+    // uint8_t *grayPixelsCheck= (uint8_t *)malloc(width * height * sizeof(uint8_t));
+    // convertRgb2Gray(inPixels, width, height, grayPixelsCheck);
+
+    // float err = computeErrorGray(grayPixels, grayPixelsCheck, width * height);
+    // printf("Error between device result and host result: %f\n", err);
 
     // Compute pixel priority
     for (int r = 0; r < height; r++) 
@@ -382,7 +393,7 @@ void seamCarvingByDevice(uchar3 *inPixels, int width, int height, int targetWidt
         }
         
         width--;                                                                            // Assign 3 things to have new set with new width = (width - 1):
-        uchar3 * dummyOut = tmpOutPixels; tmpOutPixels = newOutPixels; free(dummyOut);            //  + New img
+        uchar3 * dummyOut = tmpOutPixels; tmpOutPixels = newOutPixels; free(dummyOut);      //  + New img
         uint8_t * dummyGray = grayPixels; grayPixels = newGrayPixels; free(dummyGray);      //  + New gray scale
         int * dummyPriority = priority; priority = newPriority; free(dummyPriority);        //  + New priority
         for(int r = height - 1; r >= 0; r--)                                                //      recalculate priority at seam's neighors
