@@ -269,12 +269,12 @@ void seamCarving(uchar3 *inPixels, int width, int height, int targetWidth, uchar
         uint8_t * dummyGray = grayPixels; grayPixels = newGrayPixels; free(dummyGray);      //  + New gray scale
         int * dummyPriority = priority; priority = newPriority; free(dummyPriority);        //  + New priority
         for(int r = height - 1; r >= 0; r--)                                                //      recalculate priority at seam's neighors
+        {                                          
             for(int i = -2; i < 2; i++)
-            {
-                if(minCol1 + i > -1 && minCol1 < width)
+                if(minCol1 + i > -1 && minCol1 + i < width)
                     priority[r * width + minCol1 + i] = computePixelPriority(grayPixels, r, minCol1 + i, width, height);
-                minCol1 += path[r * (width + 1) + minCol1];
-            }
+            minCol1 += path[r * (width + 1) + minCol1];
+        }
 
         free(score);
         free(path);
