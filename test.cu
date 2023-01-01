@@ -206,7 +206,6 @@ void seamCarvingByHost(uchar3 *inPixels, int width, int height, int targetWidth,
     timer.Start();
 
     // Allocate memory
-    int *priority = (int *)malloc(width * height * sizeof(int));
     
     uint8_t *grayPixels= (uint8_t *)malloc(width * height * sizeof(uint8_t));
 
@@ -217,13 +216,14 @@ void seamCarvingByHost(uchar3 *inPixels, int width, int height, int targetWidth,
     // Turn input image to grayscale
     convertRgb2Gray(inPixels, width, height, grayPixels);
 
-    // Compute pixel priority
-    for (int r = 0; r < height; r++) 
-        for (int c = 0; c < width; c++) 
-            priority[r * width + c] = computePixelPriority(grayPixels, r, c, width, height);
-
     while (width > targetWidth)
     {
+        int *priority = (int *)malloc(width * height * sizeof(int));
+        // Compute pixel priority
+        for (int r = 0; r < height; r++) 
+            for (int c = 0; c < width; c++) 
+                priority[r * width + c] = computePixelPriority(grayPixels, r, c, width, height);
+
         // Compute min seam table
         int *score = (int *)malloc(width * height * sizeof(int));       // Dynamic score table
         int *path = (int *)malloc(width * height * sizeof(int));        // Dynamic path table
@@ -253,37 +253,23 @@ void seamCarvingByHost(uchar3 *inPixels, int width, int height, int targetWidth,
             
             // Remove from gray scale
             memcpy(newGrayPixels + r * (width - 1), grayPixels + r * width, minCol * sizeof(uint8_t));                                          // Copy first part
-            memcpy(newGrayPixels + r * (width - 1) + minCol, grayPixels + r * width + minCol + 1, (width - minCol - 1) * sizeof(uint8_t));      // Copy second part
-            // Remove from priority, more complicated because seam's neighbor (around 3 index) have been affected
-            if(minCol - 3 >= 0)                                                                                                                 // Copy first part
-                memcpy(newPriority + r * (width - 1), priority + r * width, (minCol - 2) * sizeof(int));    
-            if(minCol + 3 < width)                                                                                                              // Copy second part
-                memcpy(newPriority + r * (width - 1) + minCol + 2, priority + r * width + minCol + 3, (width - minCol - 3) * sizeof(int));                                      
-            
-            // Trace up
+            memcpy(newGrayPixels + r * (width - 1) + minCol, grayPixels + r * width + minCol + 1, (width - minCol - 1) * sizeof(uint8_t));      // Copy second part                                    
+            // Trace up 
             minCol += path[r * width + minCol];
         }
         
         width--;                                                                            // Assign 3 things to have new set with new width = (width - 1):
-        uchar3 * dummyOut = tmpOutPixels; tmpOutPixels = newOutPixels; free(dummyOut);            //  + New img
+        uchar3 * dummyOut = tmpOutPixels; tmpOutPixels = newOutPixels; free(dummyOut);      //  + New img
         uint8_t * dummyGray = grayPixels; grayPixels = newGrayPixels; free(dummyGray);      //  + New gray scale
-        int * dummyPriority = priority; priority = newPriority; free(dummyPriority);        //  + New priority
-        for(int r = height - 1; r >= 0; r--)                                                //      recalculate priority at seam's neighors
-            for(int i = -2; i < 2; i++)
-            {
-                if(minCol1 + i > -1 && minCol1 < width)
-                    priority[r * width + minCol1 + i] = computePixelPriority(grayPixels, r, minCol1 + i, width, height);
-                minCol1 += path[r * (width + 1) + minCol1];
-            }
 
         free(score);
         free(path);
+        free(priority);
     }
     
     memcpy(outPixels, tmpOutPixels, targetWidth * height * sizeof(uchar3));
     free(tmpOutPixels);
     free(grayPixels);
-    free(priority);
 
     timer.Stop();
     float time = timer.Elapsed();
@@ -314,44 +300,24 @@ void seamCarvingByDevice(uchar3 *inPixels, int width, int height, int targetWidt
     timer.Start();
 
     // Allocate memory
-    int *priority = (int *)malloc(width * height * sizeof(int));
+    
     uint8_t *grayPixels= (uint8_t *)malloc(width * height * sizeof(uint8_t));
+
     uchar3 * tmpOutPixels = (uchar3 *)malloc(width * height * sizeof(uchar3));
+
     memcpy(tmpOutPixels, inPixels, width * height * sizeof(uchar3));
     
-    uchar3 *d_inPixels;
-    CHECK(cudaMalloc(&d_inPixels, width * height * sizeof(uchar3)));
-    uint8_t * d_grayPixels;
-    CHECK(cudaMalloc(&d_grayPixels, width * height * sizeof(uint8_t)));
-    
-    dim3 gridSize((width - 1) / blockSize.x + 1, (height - 1) / blockSize.y + 1);
-
-    // Copy input to device
-    CHECK(cudaMemcpy(d_inPixels, inPixels, width * height * sizeof(uchar3), cudaMemcpyHostToDevice));
-
     // Turn input image to grayscale
-    convertRgb2GrayKernel<<<gridSize, blockSize>>>(d_inPixels, width, height, d_grayPixels);
-    CHECK(cudaDeviceSynchronize());
-    CHECK(cudaGetLastError());
-
-    CHECK(cudaMemcpy(grayPixels, d_grayPixels, width * height * sizeof(uint8_t), cudaMemcpyDeviceToHost));
-
-    CHECK(cudaFree(d_inPixels));
-    CHECK(cudaFree(d_grayPixels));
-
-    // uint8_t *grayPixelsCheck= (uint8_t *)malloc(width * height * sizeof(uint8_t));
-    // convertRgb2Gray(inPixels, width, height, grayPixelsCheck);
-
-    // float err = computeErrorGray(grayPixels, grayPixelsCheck, width * height);
-    // printf("Error between device result and host result: %f\n", err);
-
-    // Compute pixel priority
-    for (int r = 0; r < height; r++) 
-        for (int c = 0; c < width; c++) 
-            priority[r * width + c] = computePixelPriority(grayPixels, r, c, width, height);
+    convertRgb2Gray(inPixels, width, height, grayPixels);
 
     while (width > targetWidth)
     {
+        int *priority = (int *)malloc(width * height * sizeof(int));
+        // Compute pixel priority
+        for (int r = 0; r < height; r++) 
+            for (int c = 0; c < width; c++) 
+                priority[r * width + c] = computePixelPriority(grayPixels, r, c, width, height);
+
         // Compute min seam table
         int *score = (int *)malloc(width * height * sizeof(int));       // Dynamic score table
         int *path = (int *)malloc(width * height * sizeof(int));        // Dynamic path table
@@ -381,41 +347,27 @@ void seamCarvingByDevice(uchar3 *inPixels, int width, int height, int targetWidt
             
             // Remove from gray scale
             memcpy(newGrayPixels + r * (width - 1), grayPixels + r * width, minCol * sizeof(uint8_t));                                          // Copy first part
-            memcpy(newGrayPixels + r * (width - 1) + minCol, grayPixels + r * width + minCol + 1, (width - minCol - 1) * sizeof(uint8_t));      // Copy second part
-            // Remove from priority, more complicated because seam's neighbor (around 3 index) have been affected
-            if(minCol - 3 >= 0)                                                                                                                 // Copy first part
-                memcpy(newPriority + r * (width - 1), priority + r * width, (minCol - 2) * sizeof(int));    
-            if(minCol + 3 < width)                                                                                                              // Copy second part
-                memcpy(newPriority + r * (width - 1) + minCol + 2, priority + r * width + minCol + 3, (width - minCol - 3) * sizeof(int));                                      
-            
-            // Trace up
+            memcpy(newGrayPixels + r * (width - 1) + minCol, grayPixels + r * width + minCol + 1, (width - minCol - 1) * sizeof(uint8_t));      // Copy second part                                    
+            // Trace up 
             minCol += path[r * width + minCol];
         }
         
         width--;                                                                            // Assign 3 things to have new set with new width = (width - 1):
         uchar3 * dummyOut = tmpOutPixels; tmpOutPixels = newOutPixels; free(dummyOut);      //  + New img
         uint8_t * dummyGray = grayPixels; grayPixels = newGrayPixels; free(dummyGray);      //  + New gray scale
-        int * dummyPriority = priority; priority = newPriority; free(dummyPriority);        //  + New priority
-        for(int r = height - 1; r >= 0; r--)                                                //      recalculate priority at seam's neighors
-            for(int i = -2; i < 2; i++)
-            {
-                if(minCol1 + i > -1 && minCol1 < width)
-                    priority[r * width + minCol1 + i] = computePixelPriority(grayPixels, r, minCol1 + i, width, height);
-                minCol1 += path[r * (width + 1) + minCol1];
-            }
 
         free(score);
         free(path);
+        free(priority);
     }
     
     memcpy(outPixels, tmpOutPixels, targetWidth * height * sizeof(uchar3));
     free(tmpOutPixels);
     free(grayPixels);
-    free(priority);
 
     timer.Stop();
     float time = timer.Elapsed();
-    printf("Processing time (use device): %f ms\n\n", time);
+    printf("Processing time (use host): %f ms\n\n", time);
 }
 
 float computeError(uchar3 * a1, uchar3 * a2, int n)
@@ -495,7 +447,7 @@ int main(int argc, char ** argv)
         blockSize.x = atoi(argv[4]);
         blockSize.y = atoi(argv[5]);
     } 
-    seamCarvingByDevice(inPixels, width, height, targetWidth, outPixels, blockSize);
+    seamCarvingByHost(inPixels, width, height, targetWidth, outPixels);
     
     // Compute mean absolute error between host result and device result
     float err = computeError(outPixels, correctOutPixels, targetWidth * height);
