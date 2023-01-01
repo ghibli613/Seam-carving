@@ -247,31 +247,25 @@ void seamCarving(uchar3 *inPixels, int width, int height, int targetWidth, uchar
         for(int r = height - 1; r >= 0; r--) 
         {  
             // Remove seam pixel on row r by copy first and second parts (devited by seam) to new row
-            for(int i = 0; i < minCol; i++)
-            {
-                newOutPixels[i + r * (width - 1)] = tmpOutPixels[i + r * width];    // Copy first part
-                newGrayPixels[i + r * (width - 1)] = grayPixels[i + r * width];     // Copy first part
-            }
-
-            for(int i = 0; i < width - minCol - 1; i++)
-            {
-                newOutPixels[i + r * (width - 1) + minCol] = tmpOutPixels[i + r * width + minCol + 1];    // Copy second part
-                newGrayPixels[i + r * (width - 1) + minCol] = grayPixels[i + r * width + minCol + 1];     // Copy second part
-            }
+            // Remove from img
+            memcpy(newOutPixels + r * (width - 1), tmpOutPixels + r * width, minCol * sizeof(uchar3));                                             // Copy first part
+            memcpy(newOutPixels + r * (width - 1) + minCol, tmpOutPixels + r * width + minCol + 1, (width - minCol - 1) * sizeof(uchar3));         // Copy second part
+            
+            // Remove from gray scale
+            memcpy(newGrayPixels + r * (width - 1), grayPixels + r * width, minCol * sizeof(uint8_t));                                          // Copy first part
+            memcpy(newGrayPixels + r * (width - 1) + minCol, grayPixels + r * width + minCol + 1, (width - minCol - 1) * sizeof(uint8_t));      // Copy second part
             // Remove from priority, more complicated because seam's neighbor (around 3 index) have been affected
-            if(minCol - 3 >= 0)     
-                for(int i = 0; i < minCol - 2; i++)  
-                    newPriority[i + r * (width - 1)] = priority[i + r * width];                                                              // Copy first part   
-            if(minCol + 3 < width)  
-                for(int i = 0; i < width - minCol - 3; i++)     
-                    newPriority[i + r * (width - 1) + minCol + 2] = priority[i + r * width + minCol + 3];// Copy second part                                  
+            if(minCol - 3 >= 0)                                                                                                                 // Copy first part
+                memcpy(newPriority + r * (width - 1), priority + r * width, (minCol - 2) * sizeof(int));    
+            if(minCol + 3 < width)                                                                                                              // Copy second part
+                memcpy(newPriority + r * (width - 1) + minCol + 2, priority + r * width + minCol + 3, (width - minCol - 3) * sizeof(int));                                      
             
             // Trace up
             minCol += path[r * width + minCol];
         }
         
         width--;                                                                            // Assign 3 things to have new set with new width = (width - 1):
-        uchar3 * dummyOut = tmpOutPixels; tmpOutPixels = newOutPixels; free(dummyOut);            //  + New img
+        uchar3 * dummyOut = tmpOutPixels; tmpOutPixels = newOutPixels; free(dummyOut);      //  + New img
         uint8_t * dummyGray = grayPixels; grayPixels = newGrayPixels; free(dummyGray);      //  + New gray scale
         int * dummyPriority = priority; priority = newPriority; free(dummyPriority);        //  + New priority
         for(int r = height - 1; r >= 0; r--)                                                //      recalculate priority at seam's neighors
