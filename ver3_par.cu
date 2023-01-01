@@ -292,11 +292,67 @@ void seamCarvingByHost(uchar3 *inPixels, int width, int height, int targetWidth,
 
 __global__ void convertRgb2GrayKernel(uchar3 * inPixels, int width, int height, uint8_t * outPixels) 
 {
-    size_t row = blockIdx.y * blockDim.y + threadIdx.y;
-    size_t col = blockIdx.x * blockDim.x + threadIdx.x;
-    size_t idx = row * width + col;
-    if (row < height && col < width) 
+    size_t r = blockIdx.y * blockDim.y + threadIdx.y;
+    size_t c = blockIdx.x * blockDim.x + threadIdx.x;
+    size_t idx = r * width + c;
+    if (r < height && c < width) 
         outPixels[idx] = 0.299f * inPixels[idx].x + 0.587f * inPixels[idx].y + 0.114f * inPixels[idx].z;
+}
+
+__constant__ int d_xSobel[9] = {1, 0, -1, 2, 0, -2, 1, 0, -1};
+__constant__ int d_ySobel[9] = {1, 2, 1, 0, 0, 0, -1, -2, -1};
+
+__global__ void computePriorityKernel(uint8_t * inPixels, int width, int height, int * priority) 
+{
+    extern __shared__ uint8_t s_inPixels[];
+    
+    // Each block loads data from GMEM to SMEM
+    int r = blockIdx.y * blockDim.y + threadIdx.y;
+    int c = blockIdx.x * blockDim.x + threadIdx.x;
+
+	int smemHeight = (blockDim.y + 2);
+	int smemWidth = (blockDim.x + 2);
+	float numBatchs = float((smemHeight * smemWidth)) / (blockDim.x * blockDim.y);
+
+	for(int i = 0; i < numBatchs; i++)
+	{
+		int dest = threadIdx.x + (threadIdx.y * blockDim.x) + blockDim.x * blockDim.y * i;
+		int destY = dest / smemWidth;
+		int destX = dest % smemWidth;
+
+		int srcY = destY + (blockIdx.y * blockDim.y) - 1;
+		if(srcY < 0) srcY = 0;
+		else if(srcY >= height) srcY = height - 1;
+
+		int srcX = destX + (blockIdx.x * blockDim.x) - 1;
+		if(srcX < 0) srcX = 0;
+		else if(srcX >= width) srcX = width - 1;
+
+		int src = srcX + (srcY * width);
+
+		if(destY < smemHeight)
+			s_inPixels[destY * smemWidth + destX] = inPixels[src];
+	}
+
+    __syncthreads();
+    // ---------------------------------------
+
+    // Each valid thread compute priority on SMEM andwrites result from SMEM to GMEM
+    if (c < width && r < height) 
+    {
+        int x = 0, y = 0;
+        for (int filterR = 0; filterR < 3; ++filterR)
+            for (int filterC = 0; filterC < 3; ++filterC) 
+            {
+                uint8_t closest = s_inPixels[(threadIdx.y + filterR) * smemWidth + threadIdx.x + filterC];
+                size_t filterIdx = filterR * 3 + filterC;
+                x += closest * d_xSobel[filterIdx];
+                y += closest * d_ySobel[filterIdx];
+            }
+    
+        size_t idx = r * width + c;
+        priority[idx] = abs(x) + abs(y);
+    }
 }
 
 void seamCarvingByDevice(uchar3 *inPixels, int width, int height, int targetWidth, uchar3* outPixels, dim3 blockSize) 
@@ -314,6 +370,8 @@ void seamCarvingByDevice(uchar3 *inPixels, int width, int height, int targetWidt
     CHECK(cudaMalloc(&d_inPixels, width * height * sizeof(uchar3)));
     uint8_t * d_grayPixels;
     CHECK(cudaMalloc(&d_grayPixels, width * height * sizeof(uint8_t)));
+    int * d_priority;
+    CHECK(cudaMalloc(&d_priority, width * height * sizeof(int)));
     
     dim3 gridSize((width - 1) / blockSize.x + 1, (height - 1) / blockSize.y + 1);
 
@@ -325,15 +383,20 @@ void seamCarvingByDevice(uchar3 *inPixels, int width, int height, int targetWidt
     CHECK(cudaDeviceSynchronize());
     CHECK(cudaGetLastError());
 
-    CHECK(cudaMemcpy(grayPixels, d_grayPixels, width * height * sizeof(uint8_t), cudaMemcpyDeviceToHost));
-
     CHECK(cudaFree(d_inPixels));
-    CHECK(cudaFree(d_grayPixels));
+
+    size_t smemSize = ((blockSize.x + 2) * (blockSize.y + 2)) * sizeof(uint8_t);
 
     // Compute pixel priority
-    for (int r = 0; r < height; r++) 
-        for (int c = 0; c < width; c++) 
-            priority[r * width + c] = computePixelPriority(grayPixels, r, c, width, height);
+    computePriorityKernel<<<gridSize, blockSize, smemSize>>>(d_grayPixels, width, height, d_priority);
+    cudaDeviceSynchronize();
+    CHECK(cudaGetLastError());
+
+    CHECK(cudaMemcpy(grayPixels, d_grayPixels, width * height * sizeof(uint8_t), cudaMemcpyDeviceToHost));
+    CHECK(cudaMemcpy(priority, d_priority, width * height * sizeof(int), cudaMemcpyDeviceToHost));
+
+    CHECK(cudaFree(d_grayPixels));
+    CHECK(cudaFree(d_priority));
 
     while (width > targetWidth)
     {
