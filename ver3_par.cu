@@ -254,7 +254,7 @@ void seamCarvingByHost(uchar3 *inPixels, int width, int height, int targetWidth,
             // Remove from gray scale
             memcpy(newGrayPixels + r * (width - 1), grayPixels + r * width, minCol * sizeof(uint8_t));                                          // Copy first part
             memcpy(newGrayPixels + r * (width - 1) + minCol, grayPixels + r * width + minCol + 1, (width - minCol - 1) * sizeof(uint8_t));      // Copy second part
-            // Remove from priority, more complicated because seam's neighbor (around 3 index) have been affected
+            // Remove from priority, more complicated because seam's neighbour (around 3 index) have been affected
             if(minCol - 3 >= 0)                                                                                                                 // Copy first part
                 memcpy(newPriority + r * (width - 1), priority + r * width, (minCol - 2) * sizeof(int));    
             if(minCol + 3 < width)                                                                                                              // Copy second part
@@ -268,7 +268,7 @@ void seamCarvingByHost(uchar3 *inPixels, int width, int height, int targetWidth,
         uchar3 * dummyOut = tmpOutPixels; tmpOutPixels = newOutPixels; free(dummyOut);      //  + New img
         uint8_t * dummyGray = grayPixels; grayPixels = newGrayPixels; free(dummyGray);      //  + New gray scale
         int * dummyPriority = priority; priority = newPriority; free(dummyPriority);        //  + New priority
-        for(int r = height - 1; r >= 0; r--)                                                //      recalculate priority at seam's neighors
+        for(int r = height - 1; r >= 0; r--)                                                //      recalculate priority at seam's neighbours
         {                                          
             for(int i = -2; i < 2; i++)
                 if(minCol1 + i > -1 && minCol1 + i < width)
@@ -292,11 +292,13 @@ void seamCarvingByHost(uchar3 *inPixels, int width, int height, int targetWidth,
 
 __global__ void convertRgb2GrayKernel(uchar3 * inPixels, int width, int height, uint8_t * outPixels) 
 {
-    size_t r = blockIdx.y * blockDim.y + threadIdx.y;
-    size_t c = blockIdx.x * blockDim.x + threadIdx.x;
-    size_t idx = r * width + c;
-    if (r < height && c < width) 
+    size_t row = blockIdx.y * blockDim.y + threadIdx.y;
+    size_t col = blockIdx.x * blockDim.x + threadIdx.x;
+    if (row < height && col < width) 
+    {
+        size_t idx = row * width + col;
         outPixels[idx] = 0.299f * inPixels[idx].x + 0.587f * inPixels[idx].y + 0.114f * inPixels[idx].z;
+    }
 }
 
 __constant__ int d_xSobel[9] = {1, 0, -1, 2, 0, -2, 1, 0, -1};
@@ -430,7 +432,7 @@ void seamCarvingByDevice(uchar3 *inPixels, int width, int height, int targetWidt
             // Remove from gray scale
             memcpy(newGrayPixels + r * (width - 1), grayPixels + r * width, minCol * sizeof(uint8_t));                                          // Copy first part
             memcpy(newGrayPixels + r * (width - 1) + minCol, grayPixels + r * width + minCol + 1, (width - minCol - 1) * sizeof(uint8_t));      // Copy second part
-            // Remove from priority, more complicated because seam's neighbor (around 3 index) have been affected
+            // Remove from priority, more complicated because seam's neighbour (around 3 index) have been affected
             if(minCol - 3 >= 0)                                                                                                                 // Copy first part
                 memcpy(newPriority + r * (width - 1), priority + r * width, (minCol - 2) * sizeof(int));    
             if(minCol + 3 < width)                                                                                                              // Copy second part
@@ -444,7 +446,7 @@ void seamCarvingByDevice(uchar3 *inPixels, int width, int height, int targetWidt
         uchar3 * dummyOut = tmpOutPixels; tmpOutPixels = newOutPixels; free(dummyOut);      //  + New img
         uint8_t * dummyGray = grayPixels; grayPixels = newGrayPixels; free(dummyGray);      //  + New gray scale
         int * dummyPriority = priority; priority = newPriority; free(dummyPriority);        //  + New priority
-        for(int r = height - 1; r >= 0; r--)                                                //      recalculate priority at seam's neighors
+        for(int r = height - 1; r >= 0; r--)                                                //      recalculate priority at seam's neighbours
         {                                          
             for(int i = -2; i < 2; i++)
                 if(minCol1 + i > -1 && minCol1 + i < width)
@@ -463,7 +465,7 @@ void seamCarvingByDevice(uchar3 *inPixels, int width, int height, int targetWidt
 
     timer.Stop();
     float time = timer.Elapsed();
-    printf("Processing time (use device): %f ms\n\n", time);
+    printf("Processing time (use device 2): %f ms\n\n", time);
 }
 
 float computeError(uchar3 * a1, uchar3 * a2, int n)
@@ -531,7 +533,7 @@ int main(int argc, char ** argv)
 	// Caculate the width of the result image
 	int targetWidth = width - numSeamRemoved;
 
-	// Seam carving using host
+    // Seam carving using host
     uchar3 * correctOutPixels = (uchar3 *)malloc(targetWidth * height * sizeof(uchar3));
     seamCarvingByHost(inPixels, width, height, targetWidth, correctOutPixels);
 
