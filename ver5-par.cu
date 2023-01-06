@@ -400,49 +400,28 @@ __global__ void removeSeamKernel(int * route, uchar3 * inPixels, uchar3 * newInp
 
 __global__ void recalculatePriority(int * priority, uint8_t * gray, int * route, int width, int height)
 {
-    extern __shared__ uint8_t s_gray[];
-
-    // Each block loads data from GMEM to SMEM
-    int smemHeight = (blockDim.y + 2);
-    int smemWidth = (blockDim.x + 2);
-    float numBatchs = float((smemHeight * smemWidth)) / (blockDim.x * blockDim.y);
-
-    for(int i = 0; i < numBatchs; i++)
-    {
-        int dest = threadIdx.x + (threadIdx.y * blockDim.x) + blockDim.x * blockDim.y * i;
-        int destY = dest / smemWidth;
-        int destX = dest % smemWidth;
-
-        int srcY = destY + (blockIdx.y * blockDim.y) - 1;
-        if(srcY < 0) srcY = 0;
-        else if(srcY >= height) srcY = height - 1;
-
-        int srcX = destX + route[srcY] - 2;
-        if(srcX < 0) srcX = 0;
-        else if(srcX >= width) srcX = width - 1;
-
-        int src = srcX + (srcY * width);
-
-        if(destY < smemHeight)
-            s_gray[destY * smemWidth + destX] = gray[src];
-    }
-
-    int r = blockIdx.y * blockDim.y + threadIdx.y;
+    int r = blockIdx.x * blockDim.x + threadIdx.x;
     if(r < height)
     {
-        int c = threadIdx.x + route[r] - 1;
-        if(c >=0 && c < width)
+        int c = threadIdx.y + route[r] - 2;
+        if(c >= 0 && c < width)
         {
             int x = 0, y = 0;
             for (int filterR = 0; filterR < 3; ++filterR)
                 for (int filterC = 0; filterC < 3; ++filterC) 
                 {
-                    uint8_t closest = s_gray[(threadIdx.y + filterR) * smemWidth + threadIdx.x + filterC];
+                    int i = r + filterR - 1;
+                    if(i < 0) i = 0;
+                    else if(i > height - 1) i = height - 1;
+                    int j = c + filterC - 1;
+                    if(j < 0) j = 0;
+                    else if(j > width - 1) j = width - 1;
+
+                    uint8_t closest = gray[i * width + j];
                     size_t filterIdx = filterR * 3 + filterC;
                     x += closest * d_xSobel[filterIdx];
-                    y += closest * d_ySobel[filterIdx];
+                    y += closest * d_ySobel[filterIdx]; 
                 }
-        
             size_t idx = r * width + c;
             priority[idx] = abs(x) + abs(y);
         }
@@ -482,9 +461,8 @@ void seamCarvingByDevice(uchar3 *inPixels, int width, int height, int targetWidt
     dim3 edgeY(blockSize.y);
     dim3 gridSizeY((height - 1) / edgeY.x + 1);
 
-    dim3 neighbour(4, blockSize.y);
-    dim3 gridSizeNeighbour(1, (height - 1) / neighbour.y + 1);
-    size_t smemSizeNeighbour = ((4 + 2) * (blockSize.y + 2)) * sizeof(uint8_t);
+    dim3 neighbour(blockSize.y, 4);
+    dim3 gridSizeNeighbour((height - 1) / neighbour.x + 1);
 
     while (width > targetWidth)
     {
@@ -542,9 +520,21 @@ void seamCarvingByDevice(uchar3 *inPixels, int width, int height, int targetWidt
         uint8_t * dummyGray = d_grayPixels; d_grayPixels = d_newGrayPixels; CHECK(cudaFree(dummyGray));     //  + New gray scale
         int * dummyPriority = d_priority; d_priority = d_newPriority; CHECK(cudaFree(dummyPriority));       //  + New priority
         
-        recalculatePriority<<<gridSizeNeighbour, neighbour, smemSizeNeighbour>>> (d_priority, d_grayPixels, d_route, width, height);
+        recalculatePriority<<<gridSizeNeighbour, neighbour>>> (d_priority, d_grayPixels, d_route, width, height);
         CHECK(cudaDeviceSynchronize());
         CHECK(cudaGetLastError());
+
+        // int *priority = (int *)malloc(width * height * sizeof(int));
+        // uint8_t *grayPixels= (uint8_t *)malloc(width * height * sizeof(uint8_t));
+        // CHECK(cudaMemcpy(priority, d_priority, width * height * sizeof(int), cudaMemcpyDeviceToHost));
+        // CHECK(cudaMemcpy(grayPixels, d_grayPixels, width * height * sizeof(uint8_t), cudaMemcpyDeviceToHost));
+        // for(int r = height - 1; r >= 0; r--)
+        // {                                          
+        //     for(int i = -2; i < 2; i++)
+        //         if(route[r] + i > -1 && route[r] + i < width)
+        //             priority[r * width + route[r] + i] = computePixelPriority(grayPixels, r, route[r] + i, width, height);
+        // }
+        // CHECK(cudaMemcpy(d_priority, priority, width * height * sizeof(int), cudaMemcpyHostToDevice)); free(priority); free(grayPixels);
         
         free(score);
         free(path);
