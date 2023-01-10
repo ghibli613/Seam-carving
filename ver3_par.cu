@@ -465,7 +465,7 @@ void seamCarvingByDevice(uchar3 *inPixels, int width, int height, int targetWidt
 
     timer.Stop();
     float time = timer.Elapsed();
-    printf("Processing time (use device 2): %f ms\n\n", time);
+    printf("Processing time (use device): %f ms\n\n", time);
 }
 
 float computeError(uchar3 * a1, uchar3 * a2, int n)
